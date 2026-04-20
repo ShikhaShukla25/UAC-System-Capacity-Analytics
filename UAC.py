@@ -29,6 +29,7 @@ def load_data():
     }, inplace=True)
 
     cols = ['Transfers', 'Discharges', 'CBP Custody', 'HHS Care']
+
     for col in cols:
         df[col] = (
             df[col]
@@ -38,8 +39,13 @@ def load_data():
         )
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
+    # Handle duplicate dates
     df = df.groupby(df.index).sum()
+
+    # Fill missing dates
     df = df.asfreq('D')
+
+    # Fill missing values
     df = df.ffill()
 
     return df
@@ -51,10 +57,19 @@ df = load_data()
 # ================================
 df['Total_Load'] = df['CBP Custody'] + df['HHS Care']
 df['Net_Intake'] = df['Transfers'] - df['Discharges']
+df['Growth_Rate'] = df['Total_Load'].pct_change() * 100
+df['Backlog'] = df['Net_Intake'].rolling(7).sum()
 df['7_day_avg'] = df['Total_Load'].rolling(7).mean()
+df['14_day_avg'] = df['Total_Load'].rolling(14).mean()
 
 # ================================
-# 5. SIDEBAR FILTERS
+# 5. DATA VALIDATION
+# ================================
+df['Invalid_Transfer'] = df['Transfers'] > df['CBP Custody']
+df['Invalid_Discharge'] = df['Discharges'] > df['HHS Care']
+
+# ================================
+# 6. SIDEBAR FILTERS
 # ================================
 st.sidebar.header("🔍 Filters")
 
@@ -63,47 +78,109 @@ end_date = st.sidebar.date_input("End Date", df.index.max())
 
 filtered_df = df.loc[start_date:end_date]
 
+# Time Granularity
+st.sidebar.subheader("📅 Time Granularity")
+granularity = st.sidebar.selectbox("Select", ["Daily", "Weekly", "Monthly"])
+
+if granularity == "Weekly":
+    filtered_df = filtered_df.resample('W').mean()
+elif granularity == "Monthly":
+    filtered_df = filtered_df.resample('M').mean()
+
 show_forecast = st.sidebar.checkbox("Show Forecast")
 
 # ================================
-# 6. KPI CALCULATIONS
+# 7. KPI CALCULATIONS
 # ================================
 kpis = {
-    "Total Children": int(filtered_df['Total_Load'].iloc[-1]),
-    "Avg Net Intake": round(filtered_df['Net_Intake'].mean(), 2),
-    "Max Load": int(filtered_df['Total_Load'].max()),
-    "Min Load": int(filtered_df['Total_Load'].min())
+    "Total Load": int(filtered_df['Total_Load'].iloc[-1]),
+    "Net Intake Pressure": round(filtered_df['Net_Intake'].mean(), 2),
+    "Volatility Index": round(filtered_df['Total_Load'].std(), 2),
+    "Backlog Rate": int(filtered_df['Net_Intake'].sum()),
+    "Discharge Ratio": round(
+        filtered_df['Discharges'].sum() / filtered_df['Transfers'].sum(), 2
+    ) if filtered_df['Transfers'].sum() != 0 else 0
 }
 
 # ================================
-# 7. TITLE
+# 8. TITLE
 # ================================
 st.title("📊 UAC System Capacity Dashboard")
 
 # ================================
-# 8. KPI CARDS
+# 9. KPI DISPLAY
 # ================================
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
-col1.metric("Total Children", kpis["Total Children"])
-col2.metric("Avg Net Intake", kpis["Avg Net Intake"])
-col3.metric("Max Load", kpis["Max Load"])
-col4.metric("Min Load", kpis["Min Load"])
+col1.metric("Total Load", kpis["Total Load"])
+col2.metric("Net Intake", kpis["Net Intake Pressure"])
+col3.metric("Volatility", kpis["Volatility Index"])
+col4.metric("Backlog", kpis["Backlog Rate"])
+col5.metric("Discharge Ratio", kpis["Discharge Ratio"])
+
+st.markdown("---")
 
 # ================================
-# 9. CHARTS
+# 10. CHARTS
 # ================================
 st.subheader("📈 Total Load Over Time")
-st.line_chart(filtered_df[['Total_Load', '7_day_avg']])
+st.line_chart(filtered_df[['Total_Load', '7_day_avg', '14_day_avg']])
+
+st.markdown("---")
 
 st.subheader("🏥 CBP vs HHS Load")
 st.area_chart(filtered_df[['CBP Custody', 'HHS Care']])
 
+st.markdown("---")
+
 st.subheader("📊 Net Intake Trend")
 st.bar_chart(filtered_df['Net_Intake'])
 
+st.markdown("---")
+
+st.subheader("📊 Backlog Trend")
+st.line_chart(filtered_df['Backlog'])
+
+st.markdown("---")
+
+st.subheader("📈 Growth Rate (%)")
+st.line_chart(filtered_df['Growth_Rate'])
+
+st.markdown("---")
+
 # ================================
-# 10. FORECAST
+# 11. DATA VALIDATION DISPLAY
+# ================================
+st.subheader("⚠️ Data Validation Issues")
+
+st.write("Invalid Transfers:", int(filtered_df['Invalid_Transfer'].sum()))
+st.write("Invalid Discharges:", int(filtered_df['Invalid_Discharge'].sum()))
+
+st.markdown("---")
+
+# ================================
+# 12. HIGH LOAD ANALYSIS
+# ================================
+st.subheader("🔥 High Load Periods")
+
+threshold = filtered_df['Total_Load'].mean() + filtered_df['Total_Load'].std()
+high_load = filtered_df[filtered_df['Total_Load'] > threshold]
+
+st.write(high_load[['Total_Load']].tail())
+
+st.markdown("---")
+
+# ================================
+# 13. INSIGHTS
+# ================================
+st.subheader("💡 Key Insights")
+
+st.info("📌 Sustained positive net intake indicates increasing system pressure.")
+st.info("📌 High volatility suggests unstable system behavior.")
+st.info("📌 Discharge ratio reflects efficiency of system.")
+
+# ================================
+# 14. FORECAST
 # ================================
 if show_forecast:
     try:
