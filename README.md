@@ -15,8 +15,6 @@ This project analyzes system capacity and care load for unaccompanied children u
 - Streamlit
 - Matplotlib
 
-## Dashboard Preview
-(Add screenshot here)
 
 ## Run Locally
 streamlit run UAC.py
